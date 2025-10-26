@@ -21,6 +21,7 @@ if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
 }
 
 console.log('✅ Environment variables validated successfully');
+console.log(`🔑 Razorpay Key ID: ${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...`);
 
 // Initialize Razorpay instance with credentials from environment variables
 console.log('💳 Initializing Razorpay instance...');
@@ -54,11 +55,13 @@ app.use(cors({
     
     // Allow any origin in development
     if (process.env.NODE_ENV === 'development') {
+      console.log('🔓 Development mode: Allowing all origins');
       return callback(null, true);
     }
     
     // Check if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log(`✅ Allowed origin: ${origin}`);
       callback(null, true);
     } else {
       console.log(`⚠️  Origin blocked by CORS: ${origin}`);
@@ -78,13 +81,17 @@ console.log('✅ Middleware setup completed');
 // FUNCTION: Check if server is running and responsive
 app.get('/api/health', (req, res) => {
   console.log('✅ Health check endpoint called');
-  res.json({ status: 'ok', message: 'Server is running' });
+  console.log(`📍 Request from IP: ${req.ip}`);
+  res.json({ status: 'ok', message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
 // Create Razorpay Order
 // FUNCTION: Creates a new payment order with Razorpay for parking spot booking
 app.post('/api/create-razorpay-order', async (req, res) => {
   console.log('📝 Creating Razorpay order...');
+  console.log(`📍 Request from IP: ${req.ip}`);
+  console.log(`📥 Request body: ${JSON.stringify(req.body, null, 2)}`);
+  
   try {
     const { 
       amount, 
@@ -125,10 +132,13 @@ app.post('/api/create-razorpay-order', async (req, res) => {
       }
     };
 
+    console.log(`📤 Sending order request to Razorpay with options: ${JSON.stringify(options, null, 2)}`);
+    
     const order = await razorpay.orders.create(options);
     
     console.log(`✅ Razorpay order created successfully: ${order.id}`);
     console.log(`💰 Order amount: ${order.amount} ${order.currency}`);
+    console.log(`🧾 Order receipt: ${order.receipt}`);
 
     res.json({ 
       orderId: order.id,
@@ -138,6 +148,15 @@ app.post('/api/create-razorpay-order', async (req, res) => {
   } catch (error) {
     console.error('❌ Error creating Razorpay order:', error.message);
     console.error('🔧 Error stack:', error.stack);
+    
+    // Log additional error details if available
+    if (error.statusCode) {
+      console.error(`📡 HTTP Status: ${error.statusCode}`);
+    }
+    if (error.error) {
+      console.error(`💬 Razorpay Error: ${JSON.stringify(error.error, null, 2)}`);
+    }
+    
     res.status(500).json({ 
       error: 'Failed to create payment order',
       message: error.message 
@@ -149,6 +168,9 @@ app.post('/api/create-razorpay-order', async (req, res) => {
 // FUNCTION: Verifies the payment was successful with Razorpay
 app.post('/api/verify-razorpay-payment', async (req, res) => {
   console.log('🔍 Verifying Razorpay payment...');
+  console.log(`📍 Request from IP: ${req.ip}`);
+  console.log(`📥 Request body: ${JSON.stringify(req.body, null, 2)}`);
+  
   try {
     const { 
       razorpay_order_id,
@@ -183,11 +205,41 @@ app.post('/api/verify-razorpay-payment', async (req, res) => {
   } catch (error) {
     console.error('❌ Error verifying payment:', error.message);
     console.error('🔧 Error stack:', error.stack);
+    
+    // Log additional error details if available
+    if (error.statusCode) {
+      console.error(`📡 HTTP Status: ${error.statusCode}`);
+    }
+    if (error.error) {
+      console.error(`💬 Razorpay Error: ${JSON.stringify(error.error, null, 2)}`);
+    }
+    
     res.status(500).json({ 
       error: 'Failed to verify payment',
       message: error.message 
     });
   }
+});
+
+// ==================== ERROR HANDLING ====================
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('🚨 Global error handler caught an error:');
+  console.error('🔧 Error details:', err.stack);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!'
+  });
+});
+
+// Handle 404 errors
+app.use((req, res) => {
+  console.warn(`⚠️  404 - Route not found: ${req.method} ${req.originalUrl}`);
+  console.log(`📍 Request from IP: ${req.ip}`);
+  res.status(404).json({ 
+    error: 'Route not found',
+    message: `The requested route ${req.originalUrl} does not exist`
+  });
 });
 
 // ==================== SERVER STARTUP ====================
@@ -196,7 +248,7 @@ app.post('/api/verify-razorpay-payment', async (req, res) => {
 const PORT = process.env.PORT || 3002;
 
 // Start the server and listen on the specified port
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
   console.log('✅ Backend Server Started Successfully!');
   console.log('='.repeat(60));
@@ -206,11 +258,29 @@ app.listen(PORT, () => {
   console.log(`   - http://localhost:5173`);
   console.log(`   - https://trackmypark.vercel.app`);
   console.log(`   - https://trackmypark.com`);
-  console.log(`💳 Razorpay Mode: Test`);
+  console.log(`💳 Razorpay Mode: ${process.env.NODE_ENV === 'development' ? 'Test' : 'Live'}`);
+  console.log(`📂 Node Environment: ${process.env.NODE_ENV}`);
   console.log('='.repeat(60));
   console.log('\n📋 API Endpoints:');
   console.log(`   GET  http://localhost:${PORT}/api/health`);
   console.log(`   POST http://localhost:${PORT}/api/create-razorpay-order`);
   console.log(`   POST http://localhost:${PORT}/api/verify-razorpay-payment`);
   console.log('\n💡 Tip: Keep this terminal open while using the app\n');
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed successfully');
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed successfully');
+    process.exit(0);
+  });
 });
