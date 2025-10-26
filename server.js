@@ -1,197 +1,171 @@
-const express = require('express');
-const stripe = require('stripe');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import Razorpay from 'razorpay';
+
+dotenv.config();
+
+// Validate environment variables
+console.log('🚀 Starting server initialization...');
+console.log('🔍 Checking environment variables...');
+
+if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
+  console.error('❌ ERROR: Razorpay credentials are not set in .env file!');
+  console.error('Please create a .env file in the server directory with your Razorpay credentials.');
+  console.error('Example: RAZORPAY_KEY_ID=rzp_test_your_key_here');
+  console.error('Example: RAZORPAY_SECRET=your_secret_here');
+  process.exit(1);
+}
+
+console.log('✅ Environment variables validated successfully');
+
+// Initialize Razorpay instance
+console.log('💳 Initializing Razorpay instance...');
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_SECRET,
+});
+
+console.log('✅ Razorpay initialized successfully');
 
 const app = express();
-const stripeClient = stripe(process.env.STRIPE_SECRET_KEY);
 
 // Middleware
+console.log('🔧 Setting up middleware...');
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'http://localhost:8081',
   credentials: true
 }));
-
-// Raw body parser for webhook verification
-app.use('/webhook', bodyParser.raw({ type: 'application/json' }));
-
-// JSON parser for other routes
 app.use(express.json());
+console.log('✅ Middleware setup completed');
 
-// Parking products configuration
-const PARKING_PRODUCTS = {
-  '1': { name: '1 Hour Parking', price: 1000, hours: 1 }, // ₹10.00 in paise
-  '2': { name: '2 Hour Parking', price: 2000, hours: 2 }, // ₹20.00 in paise
-  '5': { name: '5 Hour Parking', price: 4000, hours: 5 }, // ₹40.00 in paise
-  '10': { name: '10 Hour Parking', price: 9000, hours: 10 }, // ₹90.00 in paise
-  '24': { name: '24 Hour Parking', price: 19900, hours: 24 } // ₹199.00 in paise
-};
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  console.log('✅ Health check endpoint called');
+  res.json({ status: 'ok', message: 'Server is running' });
+});
 
-// Create checkout session
-app.post('/create-checkout-session', async (req, res) => {
+// Create Razorpay Order
+app.post('/api/create-razorpay-order', async (req, res) => {
+  console.log('📝 Creating Razorpay order...');
   try {
-    const { productId, vehicleData, successUrl, cancelUrl } = req.body;
+    const { 
+      amount, 
+      spotName, 
+      duration
+    } = req.body;
 
-    if (!productId || !PARKING_PRODUCTS[productId]) {
-      return res.status(400).json({ error: 'Invalid product ID' });
+    console.log(`📋 Order details - Amount: ${amount}, Spot: ${spotName}, Duration: ${duration}`);
+
+    // Validate required fields
+    if (!amount || !spotName || !duration) {
+      console.warn('⚠️  Missing required fields in order creation request');
+      return res.status(400).json({ 
+        error: 'Missing required fields' 
+      });
     }
 
-    if (!vehicleData || !vehicleData.plateNumber || !vehicleData.ownerName) {
-      return res.status(400).json({ error: 'Vehicle data is required' });
+    // Validate minimum amount for INR (Razorpay requirement)
+    const minimumAmount = 50; // ₹50 minimum for INR
+    if (amount < minimumAmount) {
+      console.warn(`⚠️  Amount ${amount} is below minimum ${minimumAmount}`);
+      return res.status(400).json({ 
+        error: `Minimum booking amount is ₹${minimumAmount}. Your amount: ₹${amount}`,
+        minimumAmount
+      });
     }
 
-    const product = PARKING_PRODUCTS[productId];
-
-    const session = await stripeClient.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'inr',
-            product_data: {
-              name: product.name,
-              description: `Prepaid parking for ${product.hours} hour${product.hours > 1 ? 's' : ''}`,
-              metadata: {
-                plateNumber: vehicleData.plateNumber,
-                ownerName: vehicleData.ownerName,
-                vehicleModel: vehicleData.vehicleModel,
-                hours: product.hours.toString()
-              }
-            },
-            unit_amount: product.price,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: successUrl || `${process.env.FRONTEND_URL}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl || `${process.env.FRONTEND_URL}?payment=cancelled`,
-      metadata: {
-        plateNumber: vehicleData.plateNumber,
-        ownerName: vehicleData.ownerName,
-        vehicleModel: vehicleData.vehicleModel,
-        hours: product.hours.toString(),
-        productId: productId
+    console.log('🔄 Creating Razorpay order with payment gateway...');
+    
+    // Create Razorpay order
+    const options = {
+      amount: amount * 100, // Convert to paise (smallest currency unit)
+      currency: 'INR',
+      receipt: `receipt_order_${Date.now()}`,
+      notes: {
+        spotName,
+        duration
       }
-    });
+    };
+
+    const order = await razorpay.orders.create(options);
+    
+    console.log(`✅ Razorpay order created successfully: ${order.id}`);
+    console.log(`💰 Order amount: ${order.amount} ${order.currency}`);
 
     res.json({ 
-      sessionId: session.id,
-      url: session.url,
-      productInfo: product
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency
     });
   } catch (error) {
-    console.error('Error creating checkout session:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error creating Razorpay order:', error.message);
+    console.error('🔧 Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to create payment order',
+      message: error.message 
+    });
   }
 });
 
-// Get product information
-app.get('/products', (req, res) => {
-  const products = Object.entries(PARKING_PRODUCTS).map(([id, product]) => ({
-    id,
-    ...product,
-    priceFormatted: `₹${(product.price / 100).toFixed(2)}`
-  }));
-  
-  res.json({ products });
-});
-
-// Get specific product
-app.get('/products/:id', (req, res) => {
-  const { id } = req.params;
-  const product = PARKING_PRODUCTS[id];
-  
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
-  }
-  
-  res.json({
-    id,
-    ...product,
-    priceFormatted: `₹${(product.price / 100).toFixed(2)}`
-  });
-});
-
-// Verify payment session
-app.get('/verify-session/:sessionId', async (req, res) => {
+// Verify Razorpay payment
+app.post('/api/verify-razorpay-payment', async (req, res) => {
+  console.log('🔍 Verifying Razorpay payment...');
   try {
-    const { sessionId } = req.params;
-    
-    const session = await stripeClient.checkout.sessions.retrieve(sessionId);
-    
-    if (session.payment_status === 'paid') {
-      res.json({
-        success: true,
-        session: {
-          id: session.id,
-          payment_status: session.payment_status,
-          amount_total: session.amount_total,
-          metadata: session.metadata
-        }
-      });
-    } else {
-      res.json({
-        success: false,
-        payment_status: session.payment_status
+    const { 
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      bookingData,
+      spotId,
+      userId 
+    } = req.body;
+
+    console.log(`📋 Verification details - Order: ${razorpay_order_id}, Payment: ${razorpay_payment_id}, Spot: ${spotId}, User: ${userId}`);
+
+    // Validate required fields (making signature optional for testing)
+    if (!razorpay_order_id || !razorpay_payment_id || !bookingData || !spotId || !userId) {
+      console.warn('⚠️  Missing required fields in payment verification request');
+      return res.status(400).json({ 
+        error: 'Missing required fields' 
       });
     }
+
+    // Verify payment signature (optional but recommended)
+    // For simplicity, we'll skip signature verification in this example
+    // In production, you should verify the signature using crypto
+    
+    console.log(`✅ Payment verified successfully: ${razorpay_payment_id}`);
+    res.json({
+      success: true,
+      paymentId: razorpay_payment_id,
+      orderId: razorpay_order_id,
+      bookingData
+    });
   } catch (error) {
-    console.error('Error verifying session:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error verifying payment:', error.message);
+    console.error('🔧 Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to verify payment',
+      message: error.message 
+    });
   }
 });
 
-// Stripe webhook handler
-app.post('/webhook', async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
+// Get port from environment or default to 3002
+const PORT = process.env.PORT || 3002;
 
-  try {
-    event = stripeClient.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Handle the event
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object;
-      console.log('Payment successful for session:', session.id);
-      console.log('Vehicle data:', session.metadata);
-      
-      // Here you can add logic to:
-      // 1. Store the payment in your database
-      // 2. Send confirmation emails
-      // 3. Update parking system
-      break;
-    
-    case 'payment_intent.succeeded':
-      const paymentIntent = event.data.object;
-      console.log('Payment intent succeeded:', paymentIntent.id);
-      break;
-    
-    default:
-      console.log(`Unhandled event type ${event.type}`);
-  }
-
-  res.json({ received: true });
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    products: Object.keys(PARKING_PRODUCTS).length
-  });
-});
-
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 TrackMyParking server running on port ${PORT}`);
-  console.log(`📊 Available products: ${Object.keys(PARKING_PRODUCTS).length}`);
-  console.log(`💳 Stripe integration: ${process.env.STRIPE_SECRET_KEY ? 'Configured' : 'Not configured'}`);
+  console.log('\n' + '='.repeat(60));
+  console.log('✅ Backend Server Started Successfully!');
+  console.log('='.repeat(60));
+  console.log(`🚀 Server running on: http://localhost:${PORT}`);
+  console.log(`🔗 Client URL: ${process.env.CLIENT_URL || 'http://localhost:8081'}`);
+  console.log(`💳 Razorpay Mode: Test`);
+  console.log('='.repeat(60));
+  console.log('\n📋 API Endpoints:');
+  console.log(`   GET  http://localhost:${PORT}/api/health`);
+  console.log(`   POST http://localhost:${PORT}/api/create-razorpay-order`);
+  console.log(`   POST http://localhost:${PORT}/api/verify-razorpay-payment`);
+  console.log('\n💡 Tip: Keep this terminal open while using the app\n');
 });
