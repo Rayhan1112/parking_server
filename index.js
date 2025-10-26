@@ -1,14 +1,17 @@
+// Import required modules
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import Razorpay from 'razorpay';
 
+// Load environment variables from .env file
 dotenv.config();
 
-// Validate environment variables
+// ==================== SERVER INITIALIZATION ====================
 console.log('🚀 Starting server initialization...');
 console.log('🔍 Checking environment variables...');
 
+// Validate that required environment variables are set
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
   console.error('❌ ERROR: Razorpay credentials are not set in .env file!');
   console.error('Please create a .env file in the server directory with your Razorpay credentials.');
@@ -19,7 +22,7 @@ if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
 
 console.log('✅ Environment variables validated successfully');
 
-// Initialize Razorpay instance
+// Initialize Razorpay instance with credentials from environment variables
 console.log('💳 Initializing Razorpay instance...');
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -28,24 +31,58 @@ const razorpay = new Razorpay({
 
 console.log('✅ Razorpay initialized successfully');
 
+// Create Express application
 const app = express();
 
-// Middleware
+// ==================== MIDDLEWARE SETUP ====================
 console.log('🔧 Setting up middleware...');
+
+// Configure CORS to allow requests from any origin and specifically from deployed URLs
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:8081',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:8081',
+      'http://localhost:5173',
+      'https://trackmypark.vercel.app',
+      'https://trackmypark.com',
+      'https://trackmypark.vercel.app/'
+    ];
+    
+    // Allow any origin in development
+    if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log(`⚠️  Origin blocked by CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
+
+// Parse JSON bodies
 app.use(express.json());
 console.log('✅ Middleware setup completed');
 
+// ==================== API ENDPOINTS ====================
+
 // Health check endpoint
+// FUNCTION: Check if server is running and responsive
 app.get('/api/health', (req, res) => {
   console.log('✅ Health check endpoint called');
   res.json({ status: 'ok', message: 'Server is running' });
 });
 
 // Create Razorpay Order
+// FUNCTION: Creates a new payment order with Razorpay for parking spot booking
 app.post('/api/create-razorpay-order', async (req, res) => {
   console.log('📝 Creating Razorpay order...');
   try {
@@ -109,6 +146,7 @@ app.post('/api/create-razorpay-order', async (req, res) => {
 });
 
 // Verify Razorpay payment
+// FUNCTION: Verifies the payment was successful with Razorpay
 app.post('/api/verify-razorpay-payment', async (req, res) => {
   console.log('🔍 Verifying Razorpay payment...');
   try {
@@ -152,15 +190,22 @@ app.post('/api/verify-razorpay-payment', async (req, res) => {
   }
 });
 
+// ==================== SERVER STARTUP ====================
+
 // Get port from environment or default to 3002
 const PORT = process.env.PORT || 3002;
 
+// Start the server and listen on the specified port
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
   console.log('✅ Backend Server Started Successfully!');
   console.log('='.repeat(60));
   console.log(`🚀 Server running on: http://localhost:${PORT}`);
-  console.log(`🔗 Client URL: ${process.env.CLIENT_URL || 'http://localhost:8081'}`);
+  console.log(`🔗 Allowed Origins:`);
+  console.log(`   - http://localhost:8081`);
+  console.log(`   - http://localhost:5173`);
+  console.log(`   - https://trackmypark.vercel.app`);
+  console.log(`   - https://trackmypark.com`);
   console.log(`💳 Razorpay Mode: Test`);
   console.log('='.repeat(60));
   console.log('\n📋 API Endpoints:');
