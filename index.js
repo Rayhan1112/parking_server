@@ -10,6 +10,10 @@ dotenv.config();
 // ==================== SERVER INITIALIZATION ====================
 console.log('🚀 Starting server initialization...');
 console.log('🔍 Checking environment variables...');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('RAZORPAY_KEY_ID:', process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : 'NOT SET');
+console.log('RAZORPAY_SECRET:', process.env.RAZORPAY_SECRET ? 'SET' : 'NOT SET');
+console.log('PORT:', process.env.PORT || 3002);
 
 // Validate that required environment variables are set
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
@@ -25,12 +29,18 @@ console.log(`🔑 Razorpay Key ID: ${process.env.RAZORPAY_KEY_ID.substring(0, 10
 
 // Initialize Razorpay instance with credentials from environment variables
 console.log('💳 Initializing Razorpay instance...');
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_SECRET,
-});
-
-console.log('✅ Razorpay initialized successfully');
+let razorpay;
+try {
+  razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_SECRET,
+  });
+  console.log('✅ Razorpay initialized successfully');
+} catch (error) {
+  console.error('❌ Error initializing Razorpay:', error.message);
+  console.error('🔧 Error stack:', error.stack);
+  process.exit(1);
+}
 
 // Create Express application
 const app = express();
@@ -87,6 +97,37 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
+// Razorpay test endpoint
+// FUNCTION: Test Razorpay connectivity
+app.get('/api/test-razorpay', async (req, res) => {
+  console.log('🧪 Testing Razorpay connectivity...');
+  
+  try {
+    // Check if razorpay instance is properly initialized
+    if (!razorpay) {
+      console.error('❌ Razorpay instance is not initialized');
+      return res.status(500).json({ 
+        error: 'Payment system not initialized',
+        message: 'Razorpay instance is not properly initialized'
+      });
+    }
+    
+    // Try to fetch Razorpay account info or make a simple request
+    // For now, we'll just return success if the instance exists
+    res.json({ 
+      status: 'success',
+      message: 'Razorpay instance is properly initialized',
+      key_id: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : null
+    });
+  } catch (error) {
+    console.error('❌ Error testing Razorpay:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to test Razorpay connectivity',
+      message: error.message 
+    });
+  }
+});
+
 // Create Razorpay Order
 // FUNCTION: Creates a new payment order with Razorpay for parking spot booking
 app.post('/api/create-razorpay-order', async (req, res) => {
@@ -111,6 +152,14 @@ app.post('/api/create-razorpay-order', async (req, res) => {
       });
     }
 
+    // Validate that amount is a number
+    if (isNaN(amount) || amount <= 0) {
+      console.warn('⚠️  Invalid amount in order creation request');
+      return res.status(400).json({ 
+        error: 'Invalid amount. Amount must be a positive number.' 
+      });
+    }
+
     // Validate minimum amount for INR (Razorpay requirement)
     const minimumAmount = 50; // ₹50 minimum for INR
     if (amount < minimumAmount) {
@@ -125,7 +174,7 @@ app.post('/api/create-razorpay-order', async (req, res) => {
     
     // Create Razorpay order
     const options = {
-      amount: amount * 100, // Convert to paise (smallest currency unit)
+      amount: Math.round(amount * 100), // Convert to paise (smallest currency unit) and round to avoid floating point issues
       currency: 'INR',
       receipt: `receipt_order_${Date.now()}`,
       notes: {
@@ -136,6 +185,16 @@ app.post('/api/create-razorpay-order', async (req, res) => {
 
     console.log(`📤 Sending order request to Razorpay with options: ${JSON.stringify(options, null, 2)}`);
     
+    // Check if razorpay instance is properly initialized
+    if (!razorpay) {
+      console.error('❌ Razorpay instance is not initialized');
+      return res.status(500).json({ 
+        error: 'Payment system not initialized',
+        message: 'Razorpay instance is not properly initialized'
+      });
+    }
+    
+    // Attempt to create the order
     const order = await razorpay.orders.create(options);
     
     console.log(`✅ Razorpay order created successfully: ${order.id}`);
@@ -159,9 +218,25 @@ app.post('/api/create-razorpay-order', async (req, res) => {
       console.error(`💬 Razorpay Error: ${JSON.stringify(error.error, null, 2)}`);
     }
     
-    res.status(500).json({ 
-      error: 'Failed to create payment order',
-      message: error.message 
+    // Provide more specific error messages based on the error type
+    let errorMessage = 'Failed to create payment order';
+    let statusCode = 500;
+    
+    if (error.statusCode === 401) {
+      errorMessage = 'Authentication failed with payment provider. Please check credentials.';
+      statusCode = 500; // Still a server error from client perspective
+    } else if (error.statusCode === 400) {
+      errorMessage = 'Invalid request to payment provider. Please check the request data.';
+      statusCode = 400;
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      errorMessage = 'Unable to connect to payment provider. Please try again later.';
+      statusCode = 500;
+    }
+    
+    res.status(statusCode).json({ 
+      error: errorMessage,
+      message: error.message,
+      statusCode: error.statusCode
     });
   }
 });
