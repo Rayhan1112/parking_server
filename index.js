@@ -47,9 +47,11 @@ app.use(cors({
     // List of allowed origins
     const allowedOrigins = [
       'http://localhost:8081',
+      'http://localhost:8080',
       'http://localhost:5173',
       'https://trackmypark.vercel.app',
       'https://trackmypark.com',
+      'https://www.trackmypark.com',
       'https://trackmypark.vercel.app/'
     ];
     
