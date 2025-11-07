@@ -62,7 +62,7 @@ app.use(cors({
       'http://localhost:5173',
       'https://trackmypark.vercel.app',
       'https://trackmypark.com',
-      'https://www.trackmypark.com/',
+      'https://www.trackmypark.com',
       'https://trackmypark.vercel.app/'
     ];
     
@@ -188,6 +188,7 @@ app.post('/api/create-razorpay-order', async (req, res) => {
   console.log('📝 Creating Razorpay order...');
   console.log(`📍 Request from IP: ${req.ip}`);
   console.log(`📥 Request body: ${JSON.stringify(req.body, null, 2)}`);
+  console.log(`🔐 Using Razorpay key: ${process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...' : 'NOT SET'}`);
   
   try {
     const { 
@@ -252,6 +253,7 @@ app.post('/api/create-razorpay-order', async (req, res) => {
     console.log('🔧 Using Razorpay key_id:', process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...');
     
     // Attempt to create the order
+    console.log('🔄 Calling Razorpay orders.create API...');
     const order = await razorpay.orders.create(options);
     
     console.log(`✅ Razorpay order created successfully: ${order.id}`);
@@ -266,6 +268,7 @@ app.post('/api/create-razorpay-order', async (req, res) => {
   } catch (error) {
     console.error('❌ Error creating Razorpay order:', error.message);
     console.error('🔧 Error stack:', error.stack);
+    console.error('🔧 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     
     // Log additional error details if available
     if (error.statusCode) {
@@ -290,6 +293,9 @@ app.post('/api/create-razorpay-order', async (req, res) => {
     } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
       errorMessage = 'Unable to connect to payment provider. Please try again later.';
       statusCode = 500;
+    } else if (error.statusCode >= 500) {
+      errorMessage = 'Payment provider is temporarily unavailable. Please try again later.';
+      statusCode = 503;
     }
     
     res.status(statusCode).json({ 
