@@ -270,6 +270,9 @@ app.post('/api/create-razorpay-order', async (req, res) => {
     console.error('🔧 Error stack:', error.stack);
     console.error('🔧 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     
+    // Log request details for better debugging
+    console.error('🔧 Request body that caused the error:', JSON.stringify(req.body, null, 2));
+    
     // Log additional error details if available
     if (error.statusCode) {
       console.error(`📡 HTTP Status: ${error.statusCode}`);
@@ -298,11 +301,23 @@ app.post('/api/create-razorpay-order', async (req, res) => {
       statusCode = 503;
     }
     
-    res.status(statusCode).json({ 
+    // Send detailed error information in development mode
+    const errorResponse = {
       error: errorMessage,
       message: error.message,
       statusCode: error.statusCode
-    });
+    };
+    
+    // Add more details in development mode
+    if (process.env.NODE_ENV === 'development') {
+      errorResponse.details = {
+        timestamp: new Date().toISOString(),
+        requestId: req.id,
+        keyId: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...' : null
+      };
+    }
+    
+    res.status(statusCode).json(errorResponse);
   }
 });
 
