@@ -31,6 +31,7 @@ console.log(`🔑 Razorpay Key ID: ${process.env.RAZORPAY_KEY_ID.substring(0, 10
 console.log('💳 Initializing Razorpay instance...');
 let razorpay;
 try {
+  console.log('🔧 Creating Razorpay instance with key_id:', process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...');
   razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_SECRET,
@@ -61,7 +62,7 @@ app.use(cors({
       'http://localhost:5173',
       'https://trackmypark.vercel.app',
       'https://trackmypark.com',
-      'https://www.trackmypark.com',
+      'https://www.trackmypark.com/',
       'https://trackmypark.vercel.app/'
     ];
     
@@ -97,12 +98,64 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
+// Razorpay connectivity test endpoint
+// FUNCTION: Test Razorpay API connectivity with current credentials
+app.get('/api/test-razorpay-connectivity', async (req, res) => {
+  console.log('🧪 Testing Razorpay API connectivity...');
+  
+  try {
+    // Check if razorpay instance is properly initialized
+    if (!razorpay) {
+      console.error('❌ Razorpay instance is not initialized');
+      return res.status(500).json({ 
+        success: false,
+        error: 'Payment system not initialized',
+        message: 'Razorpay instance is not properly initialized'
+      });
+    }
+    
+    // Attempt to fetch orders (a simple API call to test credentials)
+    const orders = await razorpay.orders.all({ count: 1 });
+    console.log('✅ Razorpay connectivity test successful');
+    
+    res.json({ 
+      success: true,
+      message: 'Razorpay API connectivity verified',
+      key_id: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : null,
+      orders_count: orders.count
+    });
+  } catch (error) {
+    console.error('❌ Error testing Razorpay connectivity:', error.message);
+    
+    // Provide specific error information
+    let errorMessage = 'Failed to connect to Razorpay API';
+    if (error.statusCode === 401) {
+      errorMessage = 'Razorpay authentication failed - check your credentials';
+    } else if (error.statusCode === 403) {
+      errorMessage = 'Razorpay access forbidden - check your permissions';
+    }
+    
+    res.status(error.statusCode || 500).json({ 
+      success: false,
+      error: errorMessage,
+      message: error.message,
+      statusCode: error.statusCode
+    });
+  }
+});
+
 // Razorpay test endpoint
 // FUNCTION: Test Razorpay connectivity
 app.get('/api/test-razorpay', async (req, res) => {
   console.log('🧪 Testing Razorpay connectivity...');
   
   try {
+    // Log current environment variables
+    console.log('🔧 Current environment variables:');
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('RAZORPAY_KEY_ID:', process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : 'NOT SET');
+    console.log('RAZORPAY_SECRET:', process.env.RAZORPAY_SECRET ? 'SET' : 'NOT SET');
+    
     // Check if razorpay instance is properly initialized
     if (!razorpay) {
       console.error('❌ Razorpay instance is not initialized');
@@ -117,7 +170,8 @@ app.get('/api/test-razorpay', async (req, res) => {
     res.json({ 
       status: 'success',
       message: 'Razorpay instance is properly initialized',
-      key_id: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : null
+      key_id: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 10)}...` : null,
+      node_env: process.env.NODE_ENV
     });
   } catch (error) {
     console.error('❌ Error testing Razorpay:', error.message);
@@ -194,6 +248,9 @@ app.post('/api/create-razorpay-order', async (req, res) => {
       });
     }
     
+    // Log the credentials being used (first 10 chars only for security)
+    console.log('🔧 Using Razorpay key_id:', process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...');
+    
     // Attempt to create the order
     const order = await razorpay.orders.create(options);
     
@@ -225,6 +282,8 @@ app.post('/api/create-razorpay-order', async (req, res) => {
     if (error.statusCode === 401) {
       errorMessage = 'Authentication failed with payment provider. Please check credentials.';
       statusCode = 500; // Still a server error from client perspective
+      // Log the key being used for debugging
+      console.error('🔐 Auth failed with key:', process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...' : 'NOT SET');
     } else if (error.statusCode === 400) {
       errorMessage = 'Invalid request to payment provider. Please check the request data.';
       statusCode = 400;
@@ -340,6 +399,7 @@ const server = app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log('\n📋 API Endpoints:');
   console.log(`   GET  http://localhost:${PORT}/api/health`);
+  console.log(`   GET  http://localhost:${PORT}/api/test-razorpay-connectivity`);
   console.log(`   POST http://localhost:${PORT}/api/create-razorpay-order`);
   console.log(`   POST http://localhost:${PORT}/api/verify-razorpay-payment`);
   console.log('\n💡 Tip: Keep this terminal open while using the app\n');
