@@ -321,6 +321,147 @@ app.post('/api/create-razorpay-order', async (req, res) => {
   }
 });
 
+// Create Razorpay Payment Link
+// FUNCTION: Creates a payment link that redirects users to Razorpay's hosted payment page
+app.post('/api/create-razorpay-payment-link', async (req, res) => {
+  console.log('🔗 Creating Razorpay payment link...');
+  console.log(`📍 Request from IP: ${req.ip}`);
+  console.log(`📥 Request body: ${JSON.stringify(req.body, null, 2)}`);
+  
+  try {
+    const { 
+      amount, 
+      spotName, 
+      duration,
+      customerName,
+      customerEmail,
+      customerPhone,
+      redirectUrl
+    } = req.body;
+
+    console.log(`📋 Payment link details - Amount: ${amount}, Spot: ${spotName}, Duration: ${duration}`);
+
+    // Validate required fields
+    if (!amount || !spotName || !duration || !customerEmail || !redirectUrl) {
+      console.warn('⚠️  Missing required fields in payment link creation request');
+      return res.status(400).json({ 
+        error: 'Missing required fields: amount, spotName, duration, customerEmail, and redirectUrl are required' 
+      });
+    }
+
+    // Validate that amount is a number
+    if (isNaN(amount) || amount <= 0) {
+      console.warn('⚠️  Invalid amount in payment link creation request');
+      return res.status(400).json({ 
+        error: 'Invalid amount. Amount must be a positive number.' 
+      });
+    }
+
+    // Validate minimum amount for INR (Razorpay requirement)
+    const minimumAmount = 50; // ₹50 minimum for INR
+    if (amount < minimumAmount) {
+      console.warn(`⚠️  Amount ${amount} is below minimum ${minimumAmount}`);
+      return res.status(400).json({ 
+        error: `Minimum booking amount is ₹${minimumAmount}. Your amount: ₹${amount}`,
+        minimumAmount
+      });
+    }
+
+    console.log('🔄 Creating Razorpay payment link...');
+    
+    // Create payment link options
+    const options = {
+      amount: Math.round(amount * 100), // Convert to paise (smallest currency unit)
+      currency: 'INR',
+      description: `Parking Spot Booking - ${spotName} (${duration})`,
+      customer: {
+        name: customerName || 'Customer',
+        email: customerEmail
+      }
+    };
+
+    console.log(`📤 Sending payment link request to Razorpay with options: ${JSON.stringify(options, null, 2)}`);
+    
+    // Check if razorpay instance is properly initialized
+    if (!razorpay) {
+      console.error('❌ Razorpay instance is not initialized');
+      return res.status(500).json({ 
+        error: 'Payment system not initialized',
+        message: 'Razorpay instance is not properly initialized'
+      });
+    }
+    
+    // Log the credentials being used (first 10 chars only for security)
+    console.log('🔧 Using Razorpay key_id:', process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...');
+    
+    // Attempt to create the payment link
+    console.log('🔄 Calling Razorpay paymentLink.create API...');
+    const paymentLink = await razorpay.paymentLink.create(options);
+    
+    console.log(`✅ Razorpay payment link created successfully: ${paymentLink.id}`);
+    console.log(`🔗 Payment link URL: ${paymentLink.short_url}`);
+
+    res.json({ 
+      paymentLinkId: paymentLink.id,
+      shortUrl: paymentLink.short_url,
+      amount: paymentLink.amount,
+      currency: paymentLink.currency
+    });
+  } catch (error) {
+    console.error('❌ Error creating Razorpay payment link:', error.message);
+    console.error('🔧 Error stack:', error.stack);
+    console.error('🔧 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    
+    // Log request details for better debugging
+    console.error('🔧 Request body that caused the error:', JSON.stringify(req.body, null, 2));
+    
+    // Log additional error details if available
+    if (error.statusCode) {
+      console.error(`📡 HTTP Status: ${error.statusCode}`);
+    }
+    if (error.error) {
+      console.error(`💬 Razorpay Error: ${JSON.stringify(error.error, null, 2)}`);
+    }
+    
+    // Provide more specific error messages based on the error type
+    let errorMessage = 'Failed to create payment link';
+    let statusCode = 500;
+    
+    if (error.statusCode === 401) {
+      errorMessage = 'Authentication failed with payment provider. Please check credentials.';
+      statusCode = 500;
+      console.error('🔐 Auth failed with key:', process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...' : 'NOT SET');
+    } else if (error.statusCode === 400) {
+      errorMessage = 'Invalid request to payment provider. Please check the request data.';
+      statusCode = 400;
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      errorMessage = 'Unable to connect to payment provider. Please try again later.';
+      statusCode = 500;
+    } else if (error.statusCode >= 500) {
+      errorMessage = 'Payment provider is temporarily unavailable. Please try again later.';
+      statusCode = 503;
+    }
+    
+    // Send detailed error information in development mode
+    const errorResponse = {
+      error: errorMessage,
+      message: error.message,
+      statusCode: error.statusCode
+    };
+    
+    // Add more details in development mode
+    if (process.env.NODE_ENV === 'development') {
+      errorResponse.details = {
+        timestamp: new Date().toISOString(),
+        requestId: req.id,
+        keyId: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 10) + '...' : null
+      };
+    }
+    
+    res.status(statusCode).json(errorResponse);
+  }
+});
+
 // Verify Razorpay payment
 // FUNCTION: Verifies the payment was successful with Razorpay
 app.post('/api/verify-razorpay-payment', async (req, res) => {
@@ -422,6 +563,7 @@ const server = app.listen(PORT, () => {
   console.log(`   GET  http://localhost:${PORT}/api/health`);
   console.log(`   GET  http://localhost:${PORT}/api/test-razorpay-connectivity`);
   console.log(`   POST http://localhost:${PORT}/api/create-razorpay-order`);
+  console.log(`   POST http://localhost:${PORT}/api/create-razorpay-payment-link`);
   console.log(`   POST http://localhost:${PORT}/api/verify-razorpay-payment`);
   console.log('\n💡 Tip: Keep this terminal open while using the app\n');
 });
